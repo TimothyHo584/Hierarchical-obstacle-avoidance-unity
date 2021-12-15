@@ -30,7 +30,6 @@ parser.add_argument('--train', dest='train', action='store_true', default=False)
 parser.add_argument('--test', dest='test', action='store_true', default=False)
 parser.add_argument('--wandb', dest='wandb', action='store_true', default=False)
 parser.add_argument('--dueling', dest='dueling', action='store_true', default=False)
-parser.add_argument('--camera', type=str, default='fullview', help="Adiust which camera view you want.")
 parser.add_argument('--h_freq', type=int, default=10, help="Hierarchical first layer command frequency.")
 parser.add_argument('--run_id', type=int, default=0, help="Process on different channel connect with unity.")
 parser.add_argument('--turbo', type=int, default=1, help="Adjust unity env speed.")
@@ -42,10 +41,8 @@ GPU = True
 device_idx = 0
 
 # Env Setting
-if args.camera == 'agentview':
-    img_shape = 100
-else:
-    img_shape = 200
+
+img_shape = 100
 agent_action_dim = 2
 hierarchical_action_dim = 4
 
@@ -67,11 +64,11 @@ DETERMINISTIC = False
 # Training model save & wandb log
 project_name = "Hierarchical_IMG_DDQN"
 if args.dueling:
-    model_path = './model/Hierarchical/Dueling_DDQN_img_' + args.camera + '_hFreq_' + str(args.h_freq)
-    run_name = 'Dueling_DDQN_img_' + args.camera + '_hFreq_' + str(args.h_freq)
+    model_path = './model/Hierarchical/Dueling_DDQN_img_agentview_hFreq_' + str(args.h_freq)
+    run_name = 'Dueling_DDQN_img_agentview_hFreq_' + str(args.h_freq)
 else:
-    model_path = './model/Hierarchical/DDQN_img_' + args.camera + '_hFreq_' + str(args.h_freq)
-    run_name = 'DDQN_img_' + args.camera + '_hFreq_' + str(args.h_freq)
+    model_path = './model/Hierarchical/DDQN_img_agentview_hFreq_' + str(args.h_freq)
+    run_name = 'DDQN_img_agentview_hFreq_' + str(args.h_freq)
 
 # Second Layer Model
 GoStraight_model_path = './model/GoStraight/sac_Ray_GoStraight_1103Reward'
@@ -80,7 +77,7 @@ PassThrought_model_path = './model/PedestrianPassThrough/sac_Ray_PassThrough_102
 
 # Unity Env Setting
 unity_mode = "BuildGame"   #Use 'Editor' or 'BuildGame'
-buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Img_Field/hierarchical_Img.x86_64"
+buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Img_AgentView/hierarchical_agentview.x86_64"
 unity_workerID = args.run_id
 unity_turbo_speed = args.turbo
 #######################################
@@ -201,26 +198,28 @@ class ReplayBuffer:
 class Conv_DQN(nn.Module):
     def __init__(self, action_dim):   #Default img shape is (3,200,200)
         super(Conv_DQN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
-        self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 64, kernel_size=5, stride=2)
+        self.conv1 = nn.Conv2d(in_channels=3,  out_channels=32, kernel_size=8, stride=4)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
         self.bn2 = nn.BatchNorm2d(64)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=5, stride=2)
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)
         self.bn3 = nn.BatchNorm2d(64)
         self.pool = nn.MaxPool2d(2,2)
         
-        linear_input_size = 4 * 4 * 64
-        self.fc1 = nn.Linear(linear_input_size, 512)
-        self.fc2 = nn.Linear(512, 512)
+        linear_input_size = 3 * 3 * 64
+        self.fc1 = nn.Linear(linear_input_size, 128)
+        self.fc2 = nn.Linear(128, 512)
         self.fc3 = nn.Linear(512, action_dim)
-    def forward(self, x):
-        # conv1 -> BN -> ReLu -> MaxPool
-        # conv2 -> BN -> ReLu -> MaxPool
-        # conv3 -> BN -> ReLu -> NN
-        x = self.pool(F.relu(self.bn1(self.conv1(x))))
-        x = self.pool(F.relu(self.bn2(self.conv2(x))))
+    def forward(self, state):
+        # agentview : conv1 -> BN -> pool -> conv2 -> BN -> conv3
+        x = self.pool(F.relu(self.bn1(self.conv1(state))))
+        x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.bn3(self.conv3(x)))
-        x = F.relu(self.fc1(x.contiguous().view(x.size(0), -1)))
+
+        # x = x.contiguous().view(x.size(0), -1)
+        x = x.view(x.size(0), -1)
+
+        x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         action = self.fc3(x)
         return action
@@ -229,66 +228,42 @@ class Conv_DQN(nn.Module):
 class Dueling_DQN(nn.Module):
     def __init__(self, action_dim):
         super(Dueling_DQN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
-        self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 64, kernel_size=5, stride=2)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=8, stride=4)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
         self.bn2 = nn.BatchNorm2d(64)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=5, stride=2)
-        self.bn3 = nn.BatchNorm2d(64)
-        self.pool = nn.MaxPool2d(2,2)
-
-        linear_input_size = 4 * 4 * 64
-        self.fc1 = nn.Linear(linear_input_size, 512)
-        self.relu = nn.ReLU()
-        self.fc_value = nn.Linear(512, 256)
-        self.fc_adv = nn.Linear(512, 256)
-
-        self.value = nn.Linear(256, 1)
-        self.adv = nn.Linear(256, action_dim)
-
-    def forward(self, state):
-        y = self.pool(F.relu(self.bn1(self.conv1(state))))
-        y = self.pool(F.relu(self.bn2(self.conv2(y))))
-        y = F.relu(self.bn3(self.conv3(y))) # (b, 64, 4, 4)
-
-        y = self.relu(self.fc1(y.contiguous().view(y.size(0), -1)))
-        value = self.relu(self.fc_value(y))
-        adv = self.relu(self.fc_adv(y))
-
-        value = self.value(value)
-        adv = self.adv(adv)
-
-        advAverage = torch.mean(adv, dim=1, keepdim=True)
-        Q = value + adv - advAverage
-
-        return Q
-#######################################
-# DRQN Network (GRU Version)
-class Conv_DRQN(nn.Module):
-    def __init__(self, action_dim):
-        super(Conv_DRQN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
-        self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 64, kernel_size=5, stride=2)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=5, stride=2)
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)
         self.bn3 = nn.BatchNorm2d(64)
         self.pool = nn.MaxPool2d(2, 2)
 
-        linear_input_size = 4 * 4 * 64
-        self.fc1 = nn.Linear(linear_input_size, 512)
-        self.gru = nn.GRU(512, 512, batch_first=True)
-        self.fc2 = nn.Linear(512, action_dim)
-    def forward(self, state, hidden_in):
-        y = self.pool(F.relu(self.bn1(self.conv1(state))))
-        y = self.pool(F.relu(self.bn2(self.conv2(y))))
-        y = F.relu(self.bn3(self.conv3(y)))  # (seq, 64, 4, 4)
+        linear_input_size = 3 * 3 * 64
+        # Action Layer
+        self.action_fc1 = nn.Linear(linear_input_size, 512)
+        self.action_fc2 = nn.Linear(512, action_dim)
+        self.action_Relu = nn.LeakyReLU()
 
-        y = F.relu(self.fc1(y.contiguous().view(y.size(0), -1))) # (seq, 512)
-        y = y.view(1, y.size(0), 512)   # (1, seq, 512)
-        y, h = self.gru(y, hidden_in)
-        action = self.fc2(h.view(-1, 512))  # h size (1, 512)
-        return action, h
+        # State Layer
+        self.state_fc1 = nn.Linear(linear_input_size, 512)
+        self.state_fc2 = nn.Linear(512, 1)
+        self.state_Relu = nn.LeakyReLU()
+
+    def forward(self, state):
+        # agentview : conv1 -> BN -> pool -> conv2 -> BN -> conv3
+        x = self.pool(F.relu(self.bn1(self.conv1(state))))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+
+        x = x.view(x.size(0), -1)
+        # action layer
+        Ax =self.action_Relu(self.action_fc1(x))
+        Ax = self.action_fc2(Ax)
+        # state layer
+        Vx = self.state_Relu(self.state_fc1(x))
+        Vx = self.state_fc2(Vx)
+
+        Q = Vx + (Ax - Ax.mean())
+
+        return Q
 #######################################
 # Policy Network
 class PolicyNetwork(nn.Module):
@@ -347,10 +322,6 @@ class DQN_Trainer(object):
             self.eval_net = Dueling_DQN(hierarchical_action_dim).to(device)
             self.target_net = Dueling_DQN(hierarchical_action_dim).to(device)
             print("Use Dueling DDQN Network!")
-        elif args.rnn:
-            self.eval_net = Conv_DRQN(hierarchical_action_dim).to(device)
-            self.target_net = Conv_DRQN(hierarchical_action_dim).to(device)
-            print("Use DRQN Network!")
         else:
             self.eval_net = Conv_DQN(hierarchical_action_dim).to(device)
             self.target_net = Conv_DQN(hierarchical_action_dim).to(device)
@@ -367,13 +338,8 @@ class DQN_Trainer(object):
         if self.epsilon > FINAL_EPSILON:
             self.epsilon -= (INITIAL_EPSILON - FINAL_EPSILON) / EXPLORE
 
-        if args.rnn:
-            hidden = torch.zeros(1, 1, 512).to(device)
-            x = torch.FloatTensor(state).to(device)
-            estimate, _ = self.eval_net.forward(x, hidden)
-        else:
-            x = torch.FloatTensor(state).unsqueeze(0).to(device)
-            estimate = self.eval_net.forward(x)
+        x = torch.FloatTensor(state).unsqueeze(0).to(device)
+        estimate = self.eval_net.forward(x)
 
         if random.random() < self.epsilon:
             action = random.randint(0, hierarchical_action_dim - 1)
@@ -392,37 +358,23 @@ class DQN_Trainer(object):
         reward     = torch.FloatTensor(reward).to(device)  # reward is single value, unsqueeze() to add one dim to be [reward] at the sample dim;
         next_state = torch.FloatTensor(next_state).to(device)
         done = torch.BoolTensor(done).to(device)
-        if args.rnn:
-            ini_hidden = torch.zeros(1,1,512).to(device)
-            state = state.squeeze(0)
-            next_state = next_state.squeeze(0)
-            # print("state shape :", state.shape)
-            # print("next state shape :", next_state.shape)
 
         self.target_net.eval()
         self.eval_net.eval()
 
         # double dqn loss
         # use current network to evaluate action argmax_a' Q_current(s', a')_
-        if args.rnn:
-            action_new = self.eval_net.forward(next_state, ini_hidden)[0].max(dim=1)[1].cpu().data.view(-1, 1)
-        else:
-            action_new = self.eval_net.forward(next_state).max(dim=1)[1].cpu().data.view(-1, 1)
+
+        action_new = self.eval_net.forward(next_state).max(dim=1)[1].cpu().data.view(-1, 1)
         action_new_onehot = torch.zeros(batch_size, hierarchical_action_dim)
         action_new_onehot = Variable(action_new_onehot.scatter_(1, action_new, 1.0)).to(device)
 
         # use target network to evaluate value y = r + discount_factor * Q_tar(s', a')
-        if args.rnn:
-            y = (reward + torch.mul(((self.target_net.forward(next_state, ini_hidden)[0] * action_new_onehot).sum(dim=1) * done),
-                                    GAMMA))
-        else:
-            y = (reward + torch.mul(((self.target_net.forward(next_state) * action_new_onehot).sum(dim=1) * done), GAMMA))
+        y = (reward + torch.mul(((self.target_net.forward(next_state) * action_new_onehot).sum(dim=1) * done), GAMMA))
         # regression Q(s, a) -> y
         self.eval_net.train()
-        if args.rnn:
-            Q = (self.eval_net.forward(state, ini_hidden)[0] * action).sum(dim=1)
-        else:
-            Q = (self.eval_net.forward(state) * action).sum(dim=1)
+
+        Q = (self.eval_net.forward(state) * action).sum(dim=1)
         loss = F.mse_loss(input=Q, target=y.detach())
 
         # backward optimize
@@ -442,9 +394,6 @@ class DQN_Trainer(object):
     def load_model(self, path):
         self.eval_net.load_state_dict(torch.load(path))
         self.eval_net.eval()
-    
-    def initial_with_model(self, path):
-        self.eval_net.load_state_dict(torch.load(path))
 
 #######################################
 # SAC Policy Loader
@@ -509,15 +458,8 @@ if __name__ == '__main__':
         eps = 0
         mode_name = ['GoStraight', 'PassThrough', 'Escape', 'Stop']
 
-        # Load trained model
-        if args.start_eps > 0:
-            eps = args.start_eps
-            dqn_trainer.initial_with_model(model_path)
-            print("Trained model loaded!")
-            print('Path {}'.format(model_path))
-
         # Episode Loop
-        while eps < max_episodes:
+        for eps in range(max_episodes):
             # Get first state
             h_img, state = unity.unity_reset()
 
@@ -525,20 +467,11 @@ if __name__ == '__main__':
             episode_steps = 0
             action_mode = 0 # Mode_0:GoStright(Default), Mode_1:PassThrough, Mode_2:Escape, Mode_3:Stop
 
-            if args.rnn:
-                last_h_state = torch.zeros(1,3,img_shape,img_shape)
-
             while True: # Steps Loop
                 # Get Hierarchical first layer action
-                if args.rnn:
-                    action_mode = dqn_trainer.select_action(last_h_state)
-
-                else:
-                    action_mode = dqn_trainer.select_action(h_img)
+                action_mode = dqn_trainer.select_action(h_img)
                 
                 h_reward = 0
-                if args.rnn:
-                    h_state = []
 
                 # Second Layer action
                 for i in range(hierarchical_freq):
@@ -560,10 +493,6 @@ if __name__ == '__main__':
 
                     next_h_img, next_state, reward, done = unity.unity_step(agent_action)
 
-                    if args.rnn:
-                        h_state.append(h_img)
-                        h_img = next_h_img
-
                     state = next_state
                     h_reward += reward
                     episode_steps += 1
@@ -571,30 +500,23 @@ if __name__ == '__main__':
 
                     if done:
                         break
-                
-                print('Episode: ', eps, '| Action Mode', mode_name[action_mode], '| Hierarchical_Reward', h_reward)
-                if args.rnn:
-                    replay_buffer.push(last_h_state, action_mode, h_reward, h_state, done)
-                    last_h_state = h_state
-                else:
-                    replay_buffer.push(h_img, action_mode, h_reward, next_h_img, done)
-                    h_img = next_h_img
+
+                print("Episode : {} | Action Mode : {} | H_Reward : {} | Replay Buffer capacity(%) : {} %".format(eps,
+                            mode_name[action_mode], h_reward, (len(replay_buffer) / replay_buffer_size) * 100))
+
+                replay_buffer.push(h_img, action_mode, h_reward, next_h_img, done)
+                h_img = next_h_img
 
                 episode_reward += h_reward
 
-                if done:
-                    break
-            if args.rnn:
-                if len(replay_buffer) > 100:
-                    for i in range(update_itr):
-                        dqn_trainer.learn(batch_size)
-                    print('Model updated.')
-            else:
                 if len(replay_buffer) > 2*batch_size:
                     for i in range(update_itr):
                         dqn_trainer.learn(batch_size)
                     print('Model updated.')
-            
+
+                if done:
+                    break
+
             if eps % 20 == 0 and len(replay_buffer) > 2*batch_size:
                 dqn_trainer.save_model(model_path)
                 print('Model Saved.')
@@ -606,8 +528,6 @@ if __name__ == '__main__':
                 # Add episode reward to W&B
                 wandb.log({'Episode_Reward': episode_reward, 'epoch': eps})
                 wandb.log({'Episode_Steps': episode_steps, 'epoch': eps})
-
-            eps += 1
 
         print('Training Finish!')
         dqn_trainer.save_model(model_path)
@@ -624,21 +544,12 @@ if __name__ == '__main__':
             episode_reward = 0
             episode_steps = 0
 
-            if args.rnn:
-                # initial first last_h_state
-                last_h_state = np.zeros([1, 3, img_shape, img_shape])   # [Seq, data]
-
             while True:
                 # Firsr Layer Action
-                if args.rnn:
-                    action_mode, hidden_out = dqn_trainer.select_action(last_h_state)
-                else:
-                    action_mode = dqn_trainer.select_action(h_img)
+                action_mode = dqn_trainer.select_action(h_img)
 
                 # Set default parameter
                 h_reward = 0
-                if args.rnn:
-                    h_state = []
 
                 # Second Layer Action
                 for i in range(hierarchical_freq):
@@ -660,10 +571,6 @@ if __name__ == '__main__':
                 
                     next_h_img, next_state, reward, done = unity.unity_step(agent_action)
 
-                    if args.rnn:
-                        h_state.append(h_img)
-                        h_img = next_h_img
-
                     state = next_state
                     h_reward += reward
                     episode_steps += 1
@@ -672,10 +579,8 @@ if __name__ == '__main__':
                         break
                 print('Episode: ', eps, '| Action Mode', action_mode, '| Reward', h_reward)
 
-                if args.rnn:
-                    last_h_state = h_state
-                else:
-                    h_img = next_h_img
+
+                h_img = next_h_img
 
                 episode_reward += h_reward
 
