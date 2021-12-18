@@ -77,7 +77,7 @@ PassThrought_model_path = './model/PedestrianPassThrough/sac_Ray_PassThrough_102
 
 # Unity Env Setting
 unity_mode = "BuildGame"   #Use 'Editor' or 'BuildGame'
-buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Img_AgentView/hierarchical_agentview.x86_64"
+buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Img_AgentView/hierarchical_img_agentview.x86_64"
 unity_workerID = args.run_id
 unity_turbo_speed = args.turbo
 #######################################
@@ -216,8 +216,8 @@ class Conv_DQN(nn.Module):
         x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.bn3(self.conv3(x)))
 
-        # x = x.contiguous().view(x.size(0), -1)
-        x = x.view(x.size(0), -1)
+        x = x.contiguous().view(x.size(0), -1)
+        # x = x.view(x.size(0), -1)
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -253,7 +253,7 @@ class Dueling_DQN(nn.Module):
         x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.bn3(self.conv3(x)))
 
-        x = x.view(x.size(0), -1)
+        x = x.contiguous().view(x.size(0), -1)
         # action layer
         Ax =self.action_Relu(self.action_fc1(x))
         Ax = self.action_fc2(Ax)
@@ -535,7 +535,7 @@ if __name__ == '__main__':
 
     if args.test:
         frame_idx = 0
-        dqn_trainer.loss_func(model_path)
+        dqn_trainer.load_model(model_path)
         # Episode Loop
         for eps in range(10):
             # reset environment and get state

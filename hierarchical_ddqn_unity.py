@@ -478,8 +478,6 @@ if __name__ == '__main__':
                     if done:
                         break
 
-                # print('Episode: ', eps, '| Action Mode', mode_name[action_mode], '| Hierarchical_Reward', h_reward,
-                #        '|Replay Buffer capacity(%) :', (len(replay_buffer)/replay_buffer_size)*100)
                 print("Episode : {} | Action Mode : {} | H_Reward : {} | Replay Buffer capacity(%) : {} %".format(eps,
                     mode_name[action_mode], h_reward, (len(replay_buffer)/replay_buffer_size)*100))
 
