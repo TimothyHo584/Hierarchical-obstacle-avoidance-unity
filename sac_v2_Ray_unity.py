@@ -1,11 +1,12 @@
 # This version is used for unity Ray perception sensor 3D.
 # addition data have 1.Agent&Target distance(float) 2.Agent&Target angle(float) 3.Agent moving velocity(Vector3) 4. Agent rotation value(Quaternion)
 # Ray Sensor has 205 float var
-# addition data have 9 var
-# Total observation num is 214
+# addition data have 25 var (stack 5 frame)
+# Total observation num is 1230 (stack 5 frame)
 
 import random
 import numpy as np
+import pickle
 
 import torch
 import torch.nn as nn
@@ -24,35 +25,42 @@ import wandb
 parser = argparse.ArgumentParser(description='Train or test neural net motor controller.')
 parser.add_argument('--train', dest='train', action='store_true', default=False)
 parser.add_argument('--test', dest='test', action='store_true', default=False)
-parser.add_argument('--train_from_model', dest='train_from_model', action='store_true', default=False)
-parser.add_argument('--start_eps', type=int, default=0)
-
+parser.add_argument('--wandb', dest='wandb', action='store_true', default=False)
+# parser.add_argument('--train_from_model', dest='train_from_model', action='store_true', default=False)
+# parser.add_argument('--start_eps', type=int, default=0)
+parser.add_argument('--load_buffer', dest='load_buffer', action='store_true', default=False)
+parser.add_argument('--env', type=str, default='Editor', help="Adjust unity training Env.(Editor or BuildGame)")
+parser.add_argument('--run_id', type=int, default=0, help="Process on different channel connect with unity.")
+parser.add_argument('--turbo', type=int, default=1, help="Adjust unity env speed.")
 
 args = parser.parse_args()
 # Super Parameter
 #######################################
 GPU = True
 device_idx = 0
-replay_buffer_size = 1e6
-state_dim = 214
+
+replay_buffer_size = 100000
+state_dim = (1230+25)
 action_range = 1.
-max_episodes  = 8000
-frame_idx   = 0
-batch_size  = 64
-explore_steps = 0  # for random action sampling in the beginning of training
-update_itr = 64
+max_episodes  = 10000
+batch_size  = 128
+explore_steps = 4000  # for random action sampling in the beginning of training
+update_itr = 32
 AUTO_ENTROPY=True
 DETERMINISTIC=False
 hidden_dim = 512
-rewards     = []
-# model_path = './model/PedestrianPassThrough/sac_Ray_PassThrough_1026Reward'
-model_path = './model/GoStraight/sac_Ray_GoStraight_1103Reward'
-project_name = "sac_Ray_GoStraight_finalEnv"
+
+frame_idx   = 0
+log_buffer_dir = './logs/Pedestrian_mode/1218reward.pickle'
+model_path = './model/PedestrianPassThrough/pedestrian_mode_1218'
+project_name = "sac_Ray_PedestrianPassThrough_finalEnv"
+run_name = 'PedestrianMode_1218'
+
 # Unity Env Setting
-unity_mode = "Editor"   #Use 'Editor' or 'BuildGame'
-buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Test_Pedestrian/passThrough.x86_64"
-unity_workerID = 0
-unity_turbo_speed = 4.0
+unity_mode = args.env   #Use 'Editor' or 'BuildGame'
+buildGame_Path = "/home/timothy/Unity/BuildedGames/Pedestrian_mode/pedestrian_mode.x86_64"
+unity_workerID = args.run_id
+unity_turbo_speed = args.turbo
 #######################################
 if GPU:
     device = torch.device("cuda:" + str(device_idx) if torch.cuda.is_available() else "cpu")
@@ -61,14 +69,14 @@ else:
 print(device)
 #######################################
 # initial W&B
-if args.train:
-    wandb.init(project=project_name, entity="timothy584")
+if args.train and args.wandb:
+    wandb.init(project=project_name, entity="timothy584", name=run_name)
     # Log for super parameter
     wandb.config.update({
         "epochs": max_episodes, 
         "batch_size": batch_size,
+        "update_itr": update_itr,
         "Random_steps" : explore_steps,
-        "update_itr" : update_itr,
         "hidden_dim" : hidden_dim,
         "replay_buffer_size" : replay_buffer_size,
         "state_dim" : state_dim
@@ -94,10 +102,10 @@ class Unity_wrapper:
         decision_steps, terminal_steps = self.env.get_steps(self.behavior)
         
         for agents in decision_steps:
-            next_obs_ray = decision_steps[agents].obs[0]  #shape(205,)
-            next_obs_state = decision_steps[agents].obs[1]  #shape(9,)
+            next_obs_ray = decision_steps[agents].obs[0]  #shape(1230,)
+            next_obs_state = decision_steps[agents].obs[1]  #shape(25,)
             
-            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0) # output (255,)
+            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0) # output (1255,)
             next_state = np.around(next_state, decimals=4)
             
             reward = decision_steps[agents].reward
@@ -105,10 +113,10 @@ class Unity_wrapper:
             done = False
             
         for agents in terminal_steps:
-            next_obs_ray = terminal_steps[agents].obs[0]
-            next_obs_state = terminal_steps[agents].obs[1]
+            next_obs_ray = terminal_steps[agents].obs[0]    #shape(1230,)
+            next_obs_state = terminal_steps[agents].obs[1]  #shape(25,)
 
-            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0) # output (255,)
+            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0) # output (1255,)
             next_state = np.around(next_state, decimals=4)
 
             reward = terminal_steps[agents].reward
@@ -124,8 +132,6 @@ class Unity_wrapper:
         for agents in decision_steps:
             obs_ray = decision_steps[agents].obs[0]
             obs_state = decision_steps[agents].obs[1]
-            # print("Obs_ray shape :", obs_ray.shape)
-            # print("Obs_state shape :", obs_state.shape)
             
             state = np.concatenate((obs_ray, obs_state), axis=0)
             state = np.around(state, decimals=4)
@@ -155,7 +161,12 @@ class ReplayBuffer:
         np.stack((1,2)) => array([1, 2])
         '''
         return state, action, reward, next_state, done
-    
+    def store_buffer(self, path):
+        with open(path, 'wb') as f:
+            pickle.dump(self.buffer, f)
+    def load_buffer(self, path):
+        with open(path, 'rb') as f:
+            self.buffer = pickle.load(f)
     def __len__(self):
         return len(self.buffer)
 #######################################
@@ -253,13 +264,12 @@ class PolicyNetwork(nn.Module):
         
         normal = Normal(0, 1)
         z      = normal.sample(mean.shape).to(device)
-        action = self.action_range* torch.tanh(mean + std*z)
+        action = self.action_range*torch.tanh(mean + std*z)
         
-        action = self.action_range* torch.tanh(mean).detach().cpu().numpy()[0] if deterministic else action.detach().cpu().numpy()[0]
+        action = self.action_range*torch.tanh(mean).detach().cpu().numpy()[0] if deterministic else action.detach().cpu().numpy()[0]
         return action
 
-
-    def sample_action(self,):
+    def random_action(self,):
         a=torch.FloatTensor(self.num_actions).uniform_(-1, 1)
         return self.action_range*a.numpy()
 #######################################
@@ -277,7 +287,7 @@ class SAC_Trainer():
         print('Soft Q Network (1,2): ', self.soft_q_net1)
         print('Policy Network: ', self.policy_net)
         # Log model on wandb
-        if args.train:
+        if args.train and args.wandb:
             wandb.watch(self.soft_q_net1, log="soft_q_net1")
             wandb.watch(self.soft_q_net2, log="soft_q_net2")
             wandb.watch(self.target_soft_q_net1, log="target_soft_q_net1")
@@ -330,8 +340,8 @@ class SAC_Trainer():
             self.alpha = 1.
             alpha_loss = 0
         
-        # Log alpha on wandb
-        wandb.log({"Alpha" : self.log_alpha})
+        if args.wandb:  # Log alpha on wandb
+            wandb.log({"Alpha" : self.log_alpha})
 
     # Training Q Function
         target_q_min = torch.min(self.target_soft_q_net1(next_state, new_next_action),self.target_soft_q_net2(next_state, new_next_action)) - self.alpha * next_log_prob
@@ -357,10 +367,11 @@ class SAC_Trainer():
         
         # print('q loss: ', q_value_loss1, q_value_loss2)
         # print('policy loss: ', policy_loss )
-        # Log q loss on wandb
-        wandb.log({"q_value_loss1" : q_value_loss1})
-        wandb.log({"q_value_loss2" : q_value_loss2})
-        wandb.log({"policy loss" : policy_loss})
+
+        if args.wandb:  # Log q loss on wandb
+            wandb.log({"q_value_loss1" : q_value_loss1})
+            wandb.log({"q_value_loss2" : q_value_loss2})
+            wandb.log({"policy loss" : policy_loss})
 
 
     # Soft update the target value net
@@ -428,6 +439,7 @@ if __name__ == '__main__':
     if args.train:
         eps = 0
         # Load trained model
+        '''
         if args.start_eps > 0:
             eps = args.start_eps
             sac_trainer.initial_with_model(model_path)
@@ -437,12 +449,17 @@ if __name__ == '__main__':
             sac_trainer.initial_with_model(model_path)
             print("Trained model loaded!")
             print('Path {}'.format(model_path))
-        
+        '''
+        # Load replay buffer
+        if args.load_buffer:
+            replay_buffer.load_buffer(log_buffer_dir)
+            print('Buffer load.')
+
         # training loop
         while eps < max_episodes:
             # Get first state
             state = unity.unity_reset()
-            # print('state shape', state.shape)
+
             episode_reward = 0
             episode_steps = 0
             
@@ -450,17 +467,17 @@ if __name__ == '__main__':
                 if frame_idx > explore_steps:
                     action = sac_trainer.policy_net.get_action(state, deterministic = DETERMINISTIC)
                     # print('Origin action', action)
-                else:   # random explore_steps for begining
-                    action = sac_trainer.policy_net.sample_action()
+                else:   # random explore_steps for beginning
+                    action = sac_trainer.policy_net.random_action()
                     # print('Origin action', action)
                 
                 # execute action & Get next_state, reward, done
                 next_state, reward, done = unity.unity_step(action)
                 # print('next_state shape', next_state.shape)
-                replay_buffer.push(state, action, reward, next_state, done)
+                replay_buffer.push(state, action, np.around(reward, decimals=5), next_state, done)
                 
                 state = next_state
-                episode_reward += reward
+                episode_reward += np.around(reward, decimals=5)
                 episode_steps += 1
                 frame_idx += 1
 
@@ -472,21 +489,31 @@ if __name__ == '__main__':
                     _=sac_trainer.update(batch_size, reward_scale=1., auto_entropy=AUTO_ENTROPY, target_entropy=-1.*action_dim)
                 print('Model updated.')
                 
-            if eps % 20 == 0 and len(replay_buffer) > 2*batch_size:
+            if eps % 30 == 0 and len(replay_buffer) > 2*batch_size:
                 sac_trainer.save_model(model_path)
                 print('Model Saved.')
+                replay_buffer.store_buffer(log_buffer_dir)
+                print('Buffer Stored.')
 
-            print('Episode: ', eps, '| Episode Reward: ', episode_reward, '| Episode Steps: ', episode_steps)
-            rewards.append(episode_reward)
-            # Add episode reward to W&B
-            wandb.log({'Episode_Reward': episode_reward, 'epoch': eps})
-            wandb.log({'Episode_Steps': episode_steps, 'epoch': eps})
+            # print('Episode: ', eps, '| Episode Reward: ', episode_reward, '| Episode Steps: ', episode_steps)
+            print("Episode : {} | Eps_Reward : {} | Eps_steps : {} | Replay Buffer capacity(%) : {} %".format(eps,
+                    episode_reward, episode_steps, (replay_buffer.__len__() / replay_buffer_size) * 100))
+
+            if args.wandb:
+                # Add episode reward to W&B
+                wandb.log({'Episode_Reward': episode_reward, 'epoch': eps})
+                wandb.log({'Episode_Steps': episode_steps, 'epoch': eps})
             
             eps += 1
 
         print('Training Finish!')
         sac_trainer.save_model(model_path)
         print('Model Saved.')
+        replay_buffer.store_buffer(log_buffer_dir)
+        print('Latest Buffer Stored.')
+
+        env.close()
+        print("Environment Closed.")
 
     if args.test:
         sac_trainer.load_model(model_path)
