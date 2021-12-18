@@ -9,6 +9,8 @@
 
 import random
 import numpy as np
+import pickle
+import os
 
 import torch
 import torch.nn as nn
@@ -25,13 +27,18 @@ GPU = True
 device_idx = 0
 
 # Env Setting
-img_shape = 200
+img_shape = 100
 agent_action_dim = 2
 hierarchical_action_dim = 4
 
 # Network Setting
 hierarchical_freq = 25
 DETERMINISTIC = False
+replay_buffer_size = 1000
+
+# expert experience logs
+Expert_Exp_dir = './Expert_Exp/'
+logs_name = 'hierarchical_img_agentview.pickle'
 
 # Second Layer Model
 GoStraight_model_path = './model/GoStraight/sac_Ray_GoStraight_1103Reward'
@@ -40,9 +47,9 @@ PassThrought_model_path = './model/PedestrianPassThrough/sac_Ray_PassThrough_102
 
 # Unity Env Setting
 unity_mode = "BuildGame"   #Use 'Editor' or 'BuildGame'
-buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Gray_FullView/hierarchical_gray_fullview.x86_64"
-unity_workerID = 2
-unity_turbo_speed = 1.0
+buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Img_AgentView/hierarchical_img_agentview.x86_64"
+unity_workerID = 0
+unity_turbo_speed = 3.0
 #######################################
 if GPU:
     device = torch.device("cuda:" + str(device_idx) if torch.cuda.is_available() else "cpu")
@@ -115,6 +122,41 @@ class Unity_wrapper:
             state = np.around(state, decimals=4)
 
         return whole_img, state
+#######################################
+# Replay Buffer
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.buffer = []
+        self.position = 0
+
+    def push(self, state, action, reward, next_state, done):
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(None)
+        self.buffer[self.position] = (state, action, reward, next_state, done)
+        self.position = int((self.position + 1) % self.capacity)  # as a ring buffer
+
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        state, action, reward, next_state, done = map(np.stack, zip(*batch))  # stack for each element
+        ''' 
+        the * serves as unpack: sum(a,b) <=> batch=(a,b), sum(*batch) ;
+        zip: a=[1,2], b=[2,3], zip(a,b) => [(1, 2), (2, 3)] ;
+        the map serves as mapping the function on each list element: map(square, [2,3]) => [4,9] ;
+        np.stack((1,2)) => array([1, 2])
+        '''
+        return state, action, reward, next_state, done
+    def store_buffer(self, path):
+        with open(path, 'wb') as f:
+            pickle.dump(self.buffer, f)
+
+    def load_buffer(self, path):
+        with open(path, 'rb') as f:
+            self.buffer = pickle.load(f)
+        print('Buffer has been load!')
+
+    def __len__(self):
+        return len(self.buffer)
 #######################################
 # Policy Network
 class PolicyNetwork(nn.Module):
@@ -211,6 +253,8 @@ agent_num = len(decision_steps.agent_id)
 print("Success initial Unity Env!")
 
 ####################################
+# Initial Replay Buffer
+replay_buffer = ReplayBuffer(replay_buffer_size)
 # Initial SAC Policy loader
 policy_loader=SacPolicyLoader(Escape_model_path, GoStraight_model_path, PassThrought_model_path, 214, 2, 512)
 # Initial Unity Wrapper
@@ -219,22 +263,33 @@ unity = Unity_wrapper(env, behavior_name, agent_num, agent_action_dim)
 # Main Code
 if __name__ == '__main__':
     try:
-        frame_idx = 0
         eps = 0
+        exist_buffer_size = 0
         mode_name = ['GoStraight', 'PassThrough', 'Escape', 'Stop']
+
+        # Load exist buffer file
+        if os.path.isfile(Expert_Exp_dir+logs_name):
+            replay_buffer.load_buffer(Expert_Exp_dir+logs_name)
+            exist_buffer_size = replay_buffer.__len__()
+            print('Expert experience has been load!')
+            print('Buffer len : {}.'.format(exist_buffer_size))
 
         # Episode Loop
         while True:
             # Get first state
-            _, state = unity.unity_reset()
+            h_img, state = unity.unity_reset()
 
             episode_reward = 0
             episode_steps = 0
             action_mode = 0  # Mode_0:GoStright(Default), Mode_1:PassThrough, Mode_2:Escape, Mode_3:Stop
 
             while True:  # Steps Loop
-                # Get Hierarchical first layer action
-                action_mode = int(input("Key in action mode :"))
+                # Keyboard input detect.
+                while True:
+                    key_in = input("Key in action mode :")
+                    if key_in in ['0', '1', '2', '3']:
+                        action_mode = int(key_in)
+                        break
 
                 h_reward = 0
 
@@ -261,19 +316,23 @@ if __name__ == '__main__':
                     state = next_state
                     h_reward += reward
                     episode_steps += 1
-                    frame_idx += 1
 
                     if done:
                         break
 
-                print('Episode: ', eps, '| Action Mode', mode_name[action_mode], '| Hierarchical_Reward', h_reward)
+                replay_buffer.push(h_img, action_mode, h_reward, next_h_img, done)
+                exist_buffer_size = replay_buffer.__len__()
+                print('Buffer Size : {} | Hierarchical_Reward : {} | Episode : {}'.format(
+                    exist_buffer_size, h_reward, eps))
 
                 episode_reward += h_reward
 
                 if done:
                     break
 
-            print('Episode: ', eps, '| Episode Reward: ', episode_reward, '| Episode Steps: ', episode_steps)
+                if exist_buffer_size % 20 == 0 and exist_buffer_size > 20:
+                    replay_buffer.store_buffer(Expert_Exp_dir+logs_name)
+                    print('Buffer save!')
 
             eps += 1
     except KeyboardInterrupt:
