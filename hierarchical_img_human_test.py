@@ -27,29 +27,28 @@ GPU = True
 device_idx = 0
 
 # Env Setting
-img_shape = 100
+img_shape = 200
 agent_action_dim = 2
-hierarchical_action_dim = 4
+hierarchical_action_dim = 3
 
 # Network Setting
-hierarchical_freq = 25
+hierarchical_freq = 10
 DETERMINISTIC = False
-replay_buffer_size = 1000
+replay_buffer_size = 3000
 
 # expert experience logs
-Expert_Exp_dir = './Expert_Exp/'
-logs_name = 'hierarchical_img_agentview.pickle'
+Expert_Exp_dir = './Expert_Exp/hierarchical_noStack_fullview_hFreq_'+str(hierarchical_freq)+'_3Action.pickle'
 
 # Second Layer Model
-GoStraight_model_path = './model/GoStraight/sac_Ray_GoStraight_1103Reward'
-Escape_model_path = './model/Escape/sac_Ray_Escape_1101Reward'
-PassThrought_model_path = './model/PedestrianPassThrough/sac_Ray_PassThrough_1026Reward'
+GoStraight_model_path = './model/GoStraight/goStraight_mode'
+Escape_model_path = './model/Escape/escape_mode'
+PassThrought_model_path = './model/PedestrianPassThrough/pedestrian_mode'
 
 # Unity Env Setting
 unity_mode = "BuildGame"   #Use 'Editor' or 'BuildGame'
-buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_Img_AgentView/hierarchical_img_agentview.x86_64"
-unity_workerID = 0
-unity_turbo_speed = 3.0
+buildGame_Path = "/home/timothy/Unity/BuildedGames/Hierarchical_noStack_fullView/fullview.x86_64"
+unity_workerID = 2
+unity_turbo_speed = 1.0
 #######################################
 if GPU:
     device = torch.device("cuda:" + str(device_idx) if torch.cuda.is_available() else "cpu")
@@ -79,12 +78,12 @@ class Unity_wrapper:
         decision_steps, terminal_steps = self.env.get_steps(self.behavior)
 
         for agents in decision_steps:
-            next_whole_img = decision_steps[agents].obs[0]  # img(200,200,3)
-            next_whole_img = np.transpose(next_whole_img, (2, 0, 1))  # change shape to (3,200,200)
-            next_obs_ray = decision_steps[agents].obs[1]  # shape(205,)
-            next_obs_state = decision_steps[agents].obs[2]  # shape(9,)
+            next_whole_img = decision_steps[agents].obs[0]  # img(100,100,3)
+            next_whole_img = np.transpose(next_whole_img, (2, 0, 1))  # change shape to (3,100,100)
+            next_obs_ray = decision_steps[agents].obs[1]  # shape(1230,)
+            next_obs_state = decision_steps[agents].obs[2]  # shape(25,)
 
-            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0)  # output (255,)
+            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0)  # output (1255,)
             next_state = np.around(next_state, decimals=4)
 
             reward = decision_steps[agents].reward
@@ -92,12 +91,12 @@ class Unity_wrapper:
             done = False
 
         for agents in terminal_steps:
-            next_whole_img = terminal_steps[agents].obs[0]  # img(200,200,3)
-            next_whole_img = np.transpose(next_whole_img, (2, 0, 1))  # change shape to (3,200,200)
+            next_whole_img = terminal_steps[agents].obs[0]  # img(100,100,3)
+            next_whole_img = np.transpose(next_whole_img, (2, 0, 1))  # change shape to (3,100,100)
             next_obs_ray = terminal_steps[agents].obs[1]
             next_obs_state = terminal_steps[agents].obs[2]
 
-            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0)  # output (255,)
+            next_state = np.concatenate((next_obs_ray, next_obs_state), axis=0)  # output (1255,)
             next_state = np.around(next_state, decimals=4)
 
             reward = terminal_steps[agents].reward
@@ -111,12 +110,10 @@ class Unity_wrapper:
         # Get first state
         decision_steps, terminal_steps = self.env.get_steps(self.behavior)
         for agents in decision_steps:
-            whole_img = decision_steps[agents].obs[0]  # img(200,200,3)
-            whole_img = np.transpose(whole_img, (2, 0, 1))  # change shape to (3,200,200)
+            whole_img = decision_steps[agents].obs[0]  # img(100,100,3)
+            whole_img = np.transpose(whole_img, (2, 0, 1))  # change shape to (3,100,100)
             obs_ray = decision_steps[agents].obs[1]
             obs_state = decision_steps[agents].obs[2]
-            # print("Obs_ray shape :", obs_ray.shape)
-            # print("Obs_state shape :", obs_state.shape)
 
             state = np.concatenate((obs_ray, obs_state), axis=0)
             state = np.around(state, decimals=4)
@@ -146,6 +143,7 @@ class ReplayBuffer:
         np.stack((1,2)) => array([1, 2])
         '''
         return state, action, reward, next_state, done
+
     def store_buffer(self, path):
         with open(path, 'wb') as f:
             pickle.dump(self.buffer, f)
@@ -153,7 +151,6 @@ class ReplayBuffer:
     def load_buffer(self, path):
         with open(path, 'rb') as f:
             self.buffer = pickle.load(f)
-        print('Buffer has been load!')
 
     def __len__(self):
         return len(self.buffer)
@@ -256,7 +253,7 @@ print("Success initial Unity Env!")
 # Initial Replay Buffer
 replay_buffer = ReplayBuffer(replay_buffer_size)
 # Initial SAC Policy loader
-policy_loader=SacPolicyLoader(Escape_model_path, GoStraight_model_path, PassThrought_model_path, 214, 2, 512)
+policy_loader=SacPolicyLoader(Escape_model_path, GoStraight_model_path, PassThrought_model_path, 1255, 2, 512)
 # Initial Unity Wrapper
 unity = Unity_wrapper(env, behavior_name, agent_num, agent_action_dim)
 ####################################
@@ -265,11 +262,11 @@ if __name__ == '__main__':
     try:
         eps = 0
         exist_buffer_size = 0
-        mode_name = ['GoStraight', 'PassThrough', 'Escape', 'Stop']
+        mode_name = ['GoStraight', 'PassThrough', 'Escape']
 
         # Load exist buffer file
-        if os.path.isfile(Expert_Exp_dir+logs_name):
-            replay_buffer.load_buffer(Expert_Exp_dir+logs_name)
+        if os.path.isfile(Expert_Exp_dir):
+            replay_buffer.load_buffer(Expert_Exp_dir)
             exist_buffer_size = replay_buffer.__len__()
             print('Expert experience has been load!')
             print('Buffer len : {}.'.format(exist_buffer_size))
@@ -287,7 +284,7 @@ if __name__ == '__main__':
                 # Keyboard input detect.
                 while True:
                     key_in = input("Key in action mode :")
-                    if key_in in ['0', '1', '2', '3']:
+                    if key_in in ['0', '1', '2']:
                         action_mode = int(key_in)
                         break
 
@@ -306,10 +303,6 @@ if __name__ == '__main__':
                     # Escape Mode
                     elif action_mode == 2:
                         agent_action = policy_loader.escape_mode(state)
-
-                    # Stop Mode
-                    else:
-                        agent_action = np.array([0., 0.])
 
                     next_h_img, next_state, reward, done = unity.unity_step(agent_action)
 
@@ -331,10 +324,12 @@ if __name__ == '__main__':
                     break
 
                 if exist_buffer_size % 20 == 0 and exist_buffer_size > 20:
-                    replay_buffer.store_buffer(Expert_Exp_dir+logs_name)
+                    replay_buffer.store_buffer(Expert_Exp_dir)
                     print('Buffer save!')
 
             eps += 1
     except KeyboardInterrupt:
+        replay_buffer.store_buffer(Expert_Exp_dir)
+        print('Buffer save!')
         env.close()
         print("Environment Closed.")

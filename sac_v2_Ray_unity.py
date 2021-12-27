@@ -26,8 +26,7 @@ parser = argparse.ArgumentParser(description='Train or test neural net motor con
 parser.add_argument('--train', dest='train', action='store_true', default=False)
 parser.add_argument('--test', dest='test', action='store_true', default=False)
 parser.add_argument('--wandb', dest='wandb', action='store_true', default=False)
-# parser.add_argument('--train_from_model', dest='train_from_model', action='store_true', default=False)
-# parser.add_argument('--start_eps', type=int, default=0)
+parser.add_argument('--load_model', dest='load_model', action='store_true', default=False)
 parser.add_argument('--load_buffer', dest='load_buffer', action='store_true', default=False)
 parser.add_argument('--env', type=str, default='Editor', help="Adjust unity training Env.(Editor or BuildGame)")
 parser.add_argument('--run_id', type=int, default=0, help="Process on different channel connect with unity.")
@@ -42,23 +41,24 @@ device_idx = 0
 replay_buffer_size = 100000
 state_dim = (1230+25)
 action_range = 1.
-max_episodes  = 10000
+max_episodes  = 8000
 batch_size  = 128
-explore_steps = 4000  # for random action sampling in the beginning of training
+explore_steps = 0  # for random action sampling in the beginning of training
 update_itr = 32
 AUTO_ENTROPY=True
 DETERMINISTIC=False
 hidden_dim = 512
 
 frame_idx   = 0
-log_buffer_dir = './logs/Pedestrian_mode/1218reward.pickle'
-model_path = './model/PedestrianPassThrough/pedestrian_mode_1218'
-project_name = "sac_Ray_PedestrianPassThrough_finalEnv"
-run_name = 'PedestrianMode_1218'
+log_buffer_dir = './logs/GoStraight_mode/gostraight_mode_end.pickle'
+pretrain_model = './model/GoStraight/goStraight_mode'
+model_path = './model/PedestrianPassThrough/pedestrian_mode'
+project_name = "sac_Ray_GoStraight_finalEnv"
+run_name = 'GoStraight_mode_RandomPos_v2'
 
 # Unity Env Setting
 unity_mode = args.env   #Use 'Editor' or 'BuildGame'
-buildGame_Path = "/home/timothy/Unity/BuildedGames/Pedestrian_mode/pedestrian_mode.x86_64"
+buildGame_Path = "/home/timothy/Unity/BuildedGames/GoStraight_mode_end/gostraight_mode.x86_64"
 unity_workerID = args.run_id
 unity_turbo_speed = args.turbo
 #######################################
@@ -453,7 +453,13 @@ if __name__ == '__main__':
         # Load replay buffer
         if args.load_buffer:
             replay_buffer.load_buffer(log_buffer_dir)
+            explore_steps = 0
             print('Buffer load.')
+
+        # Load trained model
+        if args.load_model:
+            sac_trainer.initial_with_model(pretrain_model)
+            print('Model load.')
 
         # training loop
         while eps < max_episodes:
@@ -492,8 +498,6 @@ if __name__ == '__main__':
             if eps % 30 == 0 and len(replay_buffer) > 2*batch_size:
                 sac_trainer.save_model(model_path)
                 print('Model Saved.')
-                replay_buffer.store_buffer(log_buffer_dir)
-                print('Buffer Stored.')
 
             # print('Episode: ', eps, '| Episode Reward: ', episode_reward, '| Episode Steps: ', episode_steps)
             print("Episode : {} | Eps_Reward : {} | Eps_steps : {} | Replay Buffer capacity(%) : {} %".format(eps,
@@ -512,12 +516,9 @@ if __name__ == '__main__':
         replay_buffer.store_buffer(log_buffer_dir)
         print('Latest Buffer Stored.')
 
-        env.close()
-        print("Environment Closed.")
-
     if args.test:
         sac_trainer.load_model(model_path)
-        for eps in range(10):
+        for eps in range(30):
             # reset environment and get state
             state = unity.unity_reset()
             
