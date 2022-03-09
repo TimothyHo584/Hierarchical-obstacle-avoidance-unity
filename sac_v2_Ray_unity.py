@@ -4,6 +4,7 @@
 # addition data have 25 var (stack 5 frame)
 # Total observation num is 1230 (stack 5 frame)
 
+import argparse
 import random
 import numpy as np
 import pickle
@@ -15,24 +16,24 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 import torch.onnx
 
-import argparse
-
 from mlagents_envs.environment import UnityEnvironment, ActionTuple
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
-import wandb
-
 
 parser = argparse.ArgumentParser(description='Train or test neural net motor controller.')
 parser.add_argument('--train', dest='train', action='store_true', default=False)
 parser.add_argument('--test', dest='test', action='store_true', default=False)
+parser.add_argument('--behavior', dest='behavior', type=str, default='straight')
 parser.add_argument('--wandb', dest='wandb', action='store_true', default=False)
 parser.add_argument('--load_model', dest='load_model', action='store_true', default=False)
 parser.add_argument('--load_buffer', dest='load_buffer', action='store_true', default=False)
 parser.add_argument('--env', type=str, default='Editor', help="Adjust unity training Env.(Editor or BuildGame)")
 parser.add_argument('--run_id', type=int, default=0, help="Process on different channel connect with unity.")
 parser.add_argument('--turbo', type=int, default=1, help="Adjust unity env speed.")
-
 args = parser.parse_args()
+
+# (Option) show training result on W&B
+if args.wandb:
+    import wandb
 # Super Parameter
 #######################################
 GPU = True
@@ -51,14 +52,26 @@ hidden_dim = 512
 
 frame_idx   = 0
 log_buffer_dir = './logs/GoStraight_mode/gostraight_mode_end.pickle'
-pretrain_model = './model/GoStraight/goStraight_mode'
-model_path = './model/PedestrianPassThrough/pedestrian_mode'
-project_name = "sac_Ray_GoStraight_finalEnv"
-run_name = 'GoStraight_mode_RandomPos_v2'
+pretrain_model = ''
+if args.behavior == 'pedestrian':
+    model_path = './model/PedestrianPassThrough/pedestrian_mode'
+elif args.behavior == 'escape':
+    model_path = './model/Escape/escape_mode'
+else:
+    model_path = './model/GoStraight/goStraight_mode'
+print(f"Behavior Mode : {args.behavior}")
+
+project_name = f"sac_Ray_{args.behavior}_finalEnv"
+run_name = f'{args.behavior}_mode_v1'
 
 # Unity Env Setting
 unity_mode = args.env   #Use 'Editor' or 'BuildGame'
-buildGame_Path = "/home/timothy/Unity/BuildedGames/GoStraight_mode_end/gostraight_mode.x86_64"
+if args.behavior == 'pedestrian':
+    buildGame_Path = "./BuildGame/Pedestrian_mode/pedestrian.exe"
+elif args.behavior == 'escape':
+    buildGame_Path = "./BuildGame/Escape_mode/escape.exe"
+else:
+    buildGame_Path = "./BuildGame/GoStraight_mode/gostraight.exe"
 unity_workerID = args.run_id
 unity_turbo_speed = args.turbo
 #######################################
@@ -391,12 +404,12 @@ class SAC_Trainer():
         torch.save(self.policy_net.state_dict(), path+'_policy')
 
     def load_model(self, path):
-        self.soft_q_net1.load_state_dict(torch.load(path+'_q1'))
-        self.soft_q_net2.load_state_dict(torch.load(path+'_q2'))
+        # self.soft_q_net1.load_state_dict(torch.load(path+'_q1'))
+        # self.soft_q_net2.load_state_dict(torch.load(path+'_q2'))
         self.policy_net.load_state_dict(torch.load(path+'_policy'))
 
-        self.soft_q_net1.eval()
-        self.soft_q_net2.eval()
+        # self.soft_q_net1.eval()
+        # self.soft_q_net2.eval()
         self.policy_net.eval()
     
     def initial_with_model(self, path):
