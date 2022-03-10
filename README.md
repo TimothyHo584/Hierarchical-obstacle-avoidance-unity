@@ -24,7 +24,7 @@ Simulate in unity environment.
 
 詳細教學請洽官方[DOCS](https://github.com/Unity-Technologies/ml-agents/blob/release_18/docs/Installation.md "Title")
 ### Step4 (Option) 載入unitypackage
-請前往[下載地址]()
+請前往[下載地址](https://reurl.cc/yQaGgM "Title")
 
 ~~ps.檔案太大無法放入專案內，請容小弟我放在外部空間。~~
 
