@@ -1,12 +1,15 @@
 # Hierarchical-obstacle-avoidance-unity
-Design for unity environment.
+Simulate in unity environment.
 
 ## 環境版本需求
 ### PYTHON
-* pytorch (版本不限)
+* pytorch 1.10.2
 * ml-agent 0.27.0 (依照unity官方ml-agents Release_18)
-* 3
+* cloudpickle 2.0.0
+* (option) wandb 0.12.9
 ### Unity IDE Package
-* 1
-* 2
-* 3
+* ML Agents 2.1.0-exp.1
+* ML Agents Extensions 0.5.0-preview
+
+## Install
+
