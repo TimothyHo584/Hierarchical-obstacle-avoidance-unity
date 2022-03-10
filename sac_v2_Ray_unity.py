@@ -22,7 +22,7 @@ from mlagents_envs.side_channel.engine_configuration_channel import EngineConfig
 parser = argparse.ArgumentParser(description='Train or test neural net motor controller.')
 parser.add_argument('--train', dest='train', action='store_true', default=False)
 parser.add_argument('--test', dest='test', action='store_true', default=False)
-parser.add_argument('--behavior', dest='behavior', type=str, default='straight')
+parser.add_argument('--behavior', dest='behavior', type=str, default='straight', help="straight, pedestrian, escape.")
 parser.add_argument('--wandb', dest='wandb', action='store_true', default=False)
 parser.add_argument('--load_model', dest='load_model', action='store_true', default=False)
 parser.add_argument('--load_buffer', dest='load_buffer', action='store_true', default=False)
