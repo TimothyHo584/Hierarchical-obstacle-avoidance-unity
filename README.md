@@ -15,16 +15,24 @@ Simulate in unity environment.
 ## Install
 ### Step1 安裝Unity IDE
 至Unity官網下載[unity hub](https://unity3d.com/cn/get-unity/download "Title")，並且選擇安裝2019.4.30f1版本。
+
+**Note:安裝完成後，請確認已安裝dotnet SDK的相關套件。Unity的所有功能是使用C#語言來撰寫的，請確認編譯環境是否完整，不然會看到滿江紅喔!**
 ### Step2 下載ML-agents release_18
 [下載網址](https://github.com/Unity-Technologies/ml-agents/tree/release_18 "Title")
 ### Step3 安裝unity IDE所需的ML-agents套件
 安裝`com.unity.ml-agents` & `com.unity.ml-agents.extensions`。
 
 詳細教學請洽官方[DOCS](https://github.com/Unity-Technologies/ml-agents/blob/release_18/docs/Installation.md "Title")
-### Step4 載入unitypackage
+### Step4 (Option) 載入unitypackage
 請前往[下載地址]()
 
 ~~ps.檔案太大無法放入專案內，請容小弟我放在外部空間。~~
+
+導入Unity IDE步驟:
+* 透過上排的導航欄內開啟Package Manager，`Assets -> import package -> custom package`。
+* 選擇下載資料夾內的`.unitypackage`，將檔案全數引入。(這將會花費一段時間，請耐心等候)
+* 待全數檔案讀入後，無錯誤訊息跳出即可。
+
 ### Step5 安裝所需python package
 mlagents相關套件安裝方式請洽[官方教學文件](https://github.com/Unity-Technologies/ml-agents/blob/release_18/docs/Installation.md "Title")
 
